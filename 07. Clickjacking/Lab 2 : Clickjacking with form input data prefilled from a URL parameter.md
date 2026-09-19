@@ -216,10 +216,9 @@ index=web_proxy sourcetype=access_combined method=GET uri_path="/my-account"
 * [Mozilla Developer Network (MDN): Content-Security-Policy: frame-ancestors](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/frame-ancestors?utm_source=gemini)
 * [MITRE ATT&CK: T1056.003 - Input Capture: Web Portal Capture](https://attack.mitre.org/techniques/T1056/003/?utm_source=gemini)
 
-```
+
 
 > **Key Insight:** Clickjacking relies on exploiting the user's physical interaction with the DOM. When an application allows sensitive state vectors to be defined via URL parameters, it acts as a force multiplier for clickjacking—transforming a vulnerability that traditionally only triggers static clicks into a dynamic, data-injecting exploit vector capable of full account takeover.
 
 <FollowUp label="Want to learn how attackers chain Clickjacking with DOM XSS?" query="Explain how attackers chain a Clickjacking vulnerability with a DOM XSS vulnerability to achieve silent JavaScript execution, including real-world scenarios."/>
 
-```

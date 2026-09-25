@@ -8,7 +8,7 @@
 * **Target Context:** Data Exfiltration via Temporal Side-Channels
 * **Skill Level:** Practitioner (Intermediate)
 * **Estimated Completion Time:** 45–60 minutes
-* **Lab Status:** Not Solved
+* **Lab Status:**  Solved
 
 ---
 

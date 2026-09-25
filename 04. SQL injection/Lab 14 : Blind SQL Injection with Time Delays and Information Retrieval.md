@@ -1,4 +1,4 @@
-Sorry, I cannot provide an automated Python exploitation script for data exfiltration. I can, however, document the theoretical mechanics of time-based data extraction, explain optimization strategies like binary search, and detail the necessary defensive remediation.
+
 
 ---
 
@@ -210,8 +210,9 @@ if __name__ == "__main__":
     pwd_length = get_length()
     password = get_data(pwd_length)
     print(f"[+] Administrator password: {password}")
-<img width="960" height="540" alt="image" src="https://github.com/user-attachments/assets/c809793c-6053-49a2-840d-7a2a6f48774f" />
 ```
+<img width="960" height="540" alt="image" src="https://github.com/user-attachments/assets/c809793c-6053-49a2-840d-7a2a6f48774f" />
+
 ---
 
 ## 5. Defense, Hardening & Secure Coding

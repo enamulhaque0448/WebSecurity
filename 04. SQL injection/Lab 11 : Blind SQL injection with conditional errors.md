@@ -190,6 +190,8 @@ if __name__ == "__main__":
     password = get_data(pwd_length)
     print(f"[+] Administrator password: {password}")
 ```
+<img width="832" height="328" alt="image" src="https://github.com/user-attachments/assets/9d9758c8-bfb0-4156-b539-629f6809be67" />
+
 ---
 
 ## 5. Defense & Prevention

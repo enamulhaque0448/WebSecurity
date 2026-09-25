@@ -1,0 +1,124 @@
+
+---
+
+# Lab Walkthrough: Blind SQL Injection with Conditional Errors
+
+* **Vulnerability Type:** Blind SQL Injection (Error-Based / Inferential)
+* **Target Context:** Data Exfiltration via Induced Database Exceptions
+* **Skill Level:** Practitioner (Intermediate)
+* **Estimated Completion Time:** 45–60 minutes
+* **Lab Status:**  Solved
+
+---
+
+## 1. Vulnerability Architecture & Mechanism
+
+When an application is completely "blind"—meaning it does not reflect database query results or alter its UI based on query outcomes (like Boolean Blind SQLi)—attackers must find an alternative side-channel to extract data. Conditional Error-Based SQL injection leverages database exception handling to create this side-channel.
+
+* **The Core Flaw:** The application does not catch or handle database errors gracefully. If the SQL query syntax is invalid or an execution error occurs (like dividing by zero or type conversion failures), the application exposes this to the client (e.g., returning an `HTTP 500` status or a custom error string).
+* **The Mechanism:** An attacker injects a conditional statement (like `CASE WHEN ... THEN ... ELSE ... END`). If the attacker's guess about the data is True, they intentionally force the database to execute an illegal operation (e.g., `1/0`), crashing the query and triggering the observable error. If the guess is False, the query executes normally.
+* **Real-World Analogy:** Imagine trying to guess a secret number held by a robot. The robot won't speak. However, you program the robot to walk forward if your guess is wrong, but to intentionally short-circuit itself if your guess is right. You watch for the sparks to confirm your guess.
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                   CONDITIONAL ERROR DATA EXFILTRATION                  │
+└────────────────────────────────────────────────────────────────────────┘
+
+  [Attacker Request] 
+  Cookie: TrackingId=xyz'||(SELECT CASE WHEN SUBSTR(password,1,1)='a' 
+                            THEN TO_CHAR(1/0) ELSE '' END FROM users)||'
+
+  [Database Evaluation]
+  1. Is the first letter of the password 'a'? 
+     -> If TRUE: Evaluate TO_CHAR(1/0) -> Database throws "Divide by Zero" exception.
+     -> If FALSE: Evaluate '' (Empty String) -> Query completes successfully.
+  
+  [Application Routing]
+  If Exception -> Returns HTTP 500 or "An error occurred". (Attacker infers 'a').
+  If Success   -> Returns HTTP 200 normal page. (Attacker guesses 'b').
+
+```
+
+---
+
+## 2. Lab Objectives & Verification Criteria
+
+* **Target Surface:** The `TrackingId` HTTP Cookie.
+* **Primary Objective:** Extract the `administrator` password character-by-character by deliberately inducing database syntax/math errors, then authenticate to the admin panel.
+* **Validation Signal:** The lab is marked solved upon successful authentication into the administrator panel.
+
+---
+
+## 3. Step-by-Step Exploitation Flow (Conceptual)
+
+### Phase 1: Error Verification & Fingerprinting
+
+Before exfiltration, the attacker must confirm that SQL errors are observable and identify the database dialect to craft valid subqueries.
+
+* **Syntax Error Check:** Appending a single quote (`'`) breaks string encapsulation. If the application returns an error, but appending two quotes (`''`) restores normal function, it indicates unhandled SQL input.
+* **Dialect Fingerprinting:** The attacker injects predictable dialect-specific queries. For example, Oracle requires a `FROM` clause in every `SELECT` statement. Injecting `||(SELECT '')||` causes a syntax error in Oracle, but `||(SELECT '' FROM dual)||` succeeds, confirming the Oracle backend.
+
+### Phase 2: Boolean Error Oracle Validation
+
+The attacker constructs a conditional statement to ensure they can control when the error fires based on arbitrary logic.
+
+* **True Condition (Error Expected):** `CASE WHEN (1=1) THEN TO_CHAR(1/0) ELSE '' END`
+* **False Condition (Success Expected):** `CASE WHEN (1=2) THEN TO_CHAR(1/0) ELSE '' END`
+
+### Phase 3: Data Exfiltration via Inference
+
+Using functions like `SUBSTR()` (Oracle) or `SUBSTRING()`, the attacker iterates through the target string.
+
+* By placing the character guess in the `WHEN` clause, the attacker systematically tests `a`, `b`, `c`, etc.
+* When the injected character matches the database record, the `THEN` clause executes (`1/0`), crashing the query and signaling success to the attacker.
+
+---
+
+## 4. Optimization Mechanics (Binary Search vs. Linear Search)
+
+When conducting Blind SQLi, relying on a Linear Search (testing `a`, then `b`, then `c`) requires an average of 18 requests per character for an alphanumeric string. Optimization relies on **Binary Search**, which drastically reduces network noise and execution time.
+
+Instead of testing exact character matches, the payload converts the target character to its ASCII integer value and uses greater-than (`>`) or less-than (`<`) operators.
+
+**Binary Search Logic:**
+
+1. Is the ASCII value `> 77` (halfway through the character space)?
+2. If True (Error fires), the character is between 78 and 122.
+3. Next query: Is the ASCII value `> 100`?
+4. If False (No Error), the character is between 78 and 100.
+
+**Conceptual Oracle Payload (Binary Search):**
+`...CASE WHEN ASCII(SUBSTR(password,1,1)) > 100 THEN TO_CHAR(1/0) ELSE '' END...`
+
+By repeatedly halving the possibility space, a Binary Search guarantees finding the exact character in approximately 6-7 requests, regardless of whether the character is 'a' or 'z'.
+
+---
+
+## 5. Defense & Prevention
+
+* **Parameterized Queries (Prepared Statements):** This is the definitive defense. When user input (like the `TrackingId` cookie) is passed through a parameterized query, the database driver treats the payload (`'||(SELECT...`) as a literal string value, not as executable SQL structure.
+* **Generic Error Handling:** Ensure the application catches database exceptions globally and returns a unified, generic response (e.g., a standard HTTP 500 page). Never expose database-specific error strings, tracebacks, or differing HTTP status codes based on query execution success versus query failure.
+* **Input Validation & Sanitization:** If a cookie is expected to be a specific format (e.g., a 16-character alphanumeric UUID), enforce that strict regex validation on the backend before the data ever reaches the database layer.
+
+---
+
+## 6. SIEM Detection & Telemetry Analysis
+
+Conditional Error-Based SQLi is noisy and generates a distinct pattern of HTTP 500 errors interspersed with normal traffic from a single source.
+
+### Splunk Search Query (SPL)
+
+```spl
+index=web_proxy sourcetype=access_combined 
+| search cookie="*TrackingId=*" AND (cookie="*CASE*WHEN*" OR cookie="*1/0*" OR cookie="*SUBSTR*")
+| stats count by src_ip, status
+| eval Error_Rate=round((count_500 / (count_200 + count_500)) * 100, 2)
+| where Error_Rate > 10 AND (count_500 + count_200) > 20
+
+```
+
+*Indicator of Attack (IoA):* Monitor for unusually high rates of HTTP 500 errors originating from a single IP, specifically when those requests contain SQL conditional operators or math functions designed to intentionally crash execution (like division by zero or forced casting errors).
+
+---
+
+> **Key Insight:** Error-Based Blind SQLi transforms application instability into a reliable data channel. By controlling the conditions under which a database throws an exception, an attacker can use the application's failure state as a binary signal to systematically map and extract sensitive data without ever seeing the direct query output.
